@@ -8,9 +8,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root{ --paper:#F5F0E6; --ink:#10243F; --ink-soft:#4A5B74; --ink-mute:#8C95A3;
-    --rule:rgba(16,36,63,.14); --rule-strong:rgba(16,36,63,.28); --gold:#A8803A; --gold-deep:#8B6525;
-    --card:#FAF6EC; --ok:#2e7d32; --bad:#a33; }
+  :root{ --paper:#F2F4F7; --ink:#1A1A1A; --ink-soft:#595959; --ink-mute:#808080;
+    --rule:rgba(0,0,0,.12); --rule-strong:rgba(0,0,0,.24); --gold:#1F4E79; --gold-deep:#14375A;
+    --card:#FFFFFF; --ok:#548235; --bad:#a33; }
   *{box-sizing:border-box;} html,body{margin:0;background:var(--paper);color:var(--ink);
     font-family:'Inter',system-ui,sans-serif;font-feature-settings:"tnum","lnum";}
   .wrap{max-width:1120px;margin:0 auto;padding:30px 26px 60px;}
@@ -28,14 +28,14 @@
   h2.sec{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-mute);margin:0 0 12px;font-weight:600;border-bottom:1px solid var(--rule);padding-bottom:7px;}
   .field{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-bottom:1px dotted var(--rule);}
   .field:last-child{border-bottom:none;} .field label{font-size:12px;color:var(--ink-soft);}
-  input,select{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink);background:#fff;border:1px solid var(--rule-strong);padding:5px 7px;}
-  input[type=number]{width:120px;text-align:right;} input[type=date]{width:130px;}
+  input,select{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--gold);font-weight:500;background:#fff;border:1px solid var(--rule-strong);padding:5px 7px;}
+  input[type=number]{width:120px;text-align:right;} input[type=date]{width:130px;color:var(--ok);}
   input:focus,select:focus{outline:2px solid var(--gold);outline-offset:-1px;}
   .suffix{font-size:11px;color:var(--ink-mute);font-family:'IBM Plex Mono',monospace;margin-left:4px;}
   /* switch */
   .sw{position:relative;width:44px;height:22px;display:inline-block;}
   .sw input{opacity:0;width:0;height:0;}
-  .sw .sl{position:absolute;cursor:pointer;inset:0;background:#cfc7b6;border-radius:22px;transition:.15s;}
+  .sw .sl{position:absolute;cursor:pointer;inset:0;background:#c8ccd2;border-radius:22px;transition:.15s;}
   .sw .sl:before{content:"";position:absolute;height:16px;width:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s;}
   .sw input:checked + .sl{background:var(--gold);}
   .sw input:checked + .sl:before{transform:translateX(22px);}
@@ -50,7 +50,7 @@
   table.sens{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:12px;margin-top:6px;}
   table.sens th{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mute);text-align:right;padding:4px 6px;border-bottom:1px solid var(--rule);}
   table.sens td{text-align:right;padding:4px 6px;border-bottom:1px dotted var(--rule);color:var(--ink-soft);}
-  table.sens tr.basecase td{background:rgba(168,128,58,.10);color:var(--ink);}
+  table.sens tr.basecase td{background:#EAF1F8;color:var(--ink);}
   .adv-h{cursor:pointer;user-select:none;} .adv-h::before{content:"▸ ";color:var(--gold);}
   .adv-h.open::before{content:"▾ ";}
   .hide{display:none!important;}
