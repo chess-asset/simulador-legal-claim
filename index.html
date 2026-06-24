@@ -106,9 +106,8 @@
 
         <div class="subhdr">Fase precatório</div>
         <div class="field"><label>Prazo até pagamento<span class="help" title="Meses entre virar precatório e o pagamento (bullet).">i</span></label><span><input type="number" id="prazo" value="0" oninput="recalc()"><span class="suffix">meses</span></span></div>
-        <div class="field"><label>Correção precatório<span class="help" title="Índice + spread que corrigem o precatório DEPOIS de inscrito. Pré = taxa fixa; CDI = curva nominal + spread; IPCA = inflação (campo IPCA abaixo) + spread.">i</span></label><span>
-          <select id="corrIdx" onchange="recalc()"><option selected>Pré</option><option>IPCA</option><option>CDI</option></select>
-          <span class="suffix" id="connCorr">+</span><input type="number" id="corrSpread" value="0" step="0.1" oninput="recalc()"><span class="suffix">% a.a.</span></span></div>
+        <div class="field"><label>Correção precatório<span class="help" title="O precatório é SEMPRE corrigido por IPCA + spread (default 2). Só o pré-precatório pode variar de índice. O IPCA usado é o do campo IPCA abaixo (implícito ETTJ ou manual).">i</span></label><span>
+          <span class="suffix" style="color:var(--gold);font-weight:600;font-family:'IBM Plex Mono',monospace">IPCA</span><span class="suffix" id="connCorr">+</span><input type="number" id="corrSpread" value="2" step="0.1" oninput="recalc()"><span class="suffix">% a.a.</span></span></div>
         <div class="field" id="rowIpca"><label>IPCA<span class="help" title="Premissa ÚNICA de inflação. ETTJ = IPCA médio implícito (breakeven) da curva. Manual = você sobrepõe. Alimenta tudo que estiver indexado a IPCA (pré-precatório, precatório e earn-out).">i</span></label><span>
           <span class="seg" style="margin-right:6px"><button id="ipcaCurva" class="on" onclick="setIpca('curva')">ETTJ</button><button id="ipcaMan" onclick="setIpca('manual')">Manual</button></span>
           <input type="number" id="ipcaVal" value="0" step="0.1" oninput="recalc()" disabled><span class="suffix">% a.a.</span></span></div>
@@ -459,7 +458,7 @@ function readInputs(){
                                   : LEVAS.map(l=>({date:l[0], valor:l[1]}));
   return { ehPrecatorio:$('ehPrec').checked, modo:MODO, temEarnout:$('temEo').checked, temAcordo:$('temAc').checked,
     face:money('face'), viraMeses:num('viraMeses'), prazoMeses:num('prazo'),
-    corrIdx:$('corrIdx').value, corrSpread:num('corrSpread')/100,
+    corrIdx:"IPCA", corrSpread:num('corrSpread')/100,
     corrPreIdx:$('corrPreIdx').value, corrPre:num('corrPre')/100,
     levas, acordoFator:num('acFator')/100, acordoPrazo:num('acPrazo'),
     eoIdx:$('eoIdx').value, eoSpread:num('eoSpread')/100,
@@ -567,7 +566,7 @@ function goalSeek(){
 function buildState(){
   return { ehP:$('ehPrec').checked, eo:$('temEo').checked, ac:$('temAc').checked, modo:MODO,
     face:$('face').value, vira:num('viraMeses'), prazo:num('prazo'),
-    ci:$('corrIdx').value, cs:num('corrSpread'), cpi:$('corrPreIdx').value, cp:num('corrPre'),
+    cs:num('corrSpread'), cpi:$('corrPreIdx').value, cp:num('corrPre'),
     im:IPCAMODE, iv:num('ipcaVal'), preco:$('preco').value, ta:num('tirAlvo'),
     af:num('acFator'), ap:num('acPrazo'), ei:$('eoIdx').value, es:num('eoSpread'),
     jan:JAN_DEF, levas:LEVAS };
@@ -575,7 +574,7 @@ function buildState(){
 function applyState(s){ try{
   $('ehPrec').checked=!!s.ehP; $('temEo').checked=!!s.eo; $('temAc').checked=!!s.ac;
   $('face').value=s.face; $('viraMeses').value=s.vira; $('prazo').value=s.prazo;
-  $('corrIdx').value=s.ci; $('corrSpread').value=s.cs; if(s.cpi)$('corrPreIdx').value=s.cpi; $('corrPre').value=s.cp;
+  $('corrSpread').value=s.cs; if(s.cpi)$('corrPreIdx').value=s.cpi; $('corrPre').value=s.cp;
   $('ipcaVal').value=s.iv; $('preco').value=s.preco; $('tirAlvo').value=s.ta;
   $('acFator').value=s.af; $('acPrazo').value=s.ap; $('eoIdx').value=s.ei; $('eoSpread').value=s.es;
   if(Array.isArray(s.jan)) JAN_DEF.splice(0,JAN_DEF.length,...s.jan);
