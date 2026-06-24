@@ -66,7 +66,6 @@
       <h1>Simulador · <em>Precatório</em></h1></div>
     <div class="right"><div id="curvalbl">Curva ETTJ —</div><div>Estimativa indicativa</div></div>
   </header>
-  <div id="selftest" class="selftest">self-test: …</div>
 
   <div class="grid">
     <!-- ENTRADAS -->
@@ -85,7 +84,7 @@
 
       <div class="panel">
         <h2 class="sec">Precatório</h2>
-        <div class="field"><label>Valor de face</label><span><input type="number" id="face" value="40000000" oninput="recalc()"><span class="suffix">R$</span></span></div>
+        <div class="field"><label>Valor de face</label><span><input type="text" inputmode="decimal" id="face" value="40.000.000,00" oninput="maskMoney(this);recalc()"><span class="suffix">R$</span></span></div>
         <div class="field" id="rowVira"><label>Vira precatório em</label><span><input type="number" id="viraMeses" value="72" oninput="recalc()"><span class="suffix">meses</span></span></div>
         <div class="field"><label>Prazo até pagamento</label><span><input type="number" id="prazo" value="6" oninput="recalc()"><span class="suffix">meses</span></span></div>
         <div class="field"><label>Correção precatório</label><span>
@@ -96,7 +95,7 @@
 
       <div class="panel">
         <h2 class="sec">Aquisição</h2>
-        <div class="field" id="rowPreco"><label>Preço (à vista)</label><span><input type="number" id="preco" value="5000000" oninput="recalc()"><span class="suffix">R$</span></span></div>
+        <div class="field" id="rowPreco"><label>Preço (à vista)</label><span><input type="text" inputmode="decimal" id="preco" value="5.000.000,00" oninput="maskMoney(this);recalc()"><span class="suffix">R$</span></span></div>
         <div id="boxLevas" class="hide">
           <table class="levas" id="tblLevas"><thead><tr><th style="text-align:left;font-size:9px;color:var(--ink-mute)">Data</th><th style="font-size:9px;color:var(--ink-mute)">Valor (R$)</th><th></th></tr></thead><tbody></tbody></table>
           <button class="btn" onclick="addLeva()">+ leva</button>
@@ -134,7 +133,15 @@
       </div>
       <div class="panel">
         <h2 class="sec">Sensibilidade — TIR × preço</h2>
-        <table class="sens" id="tblSens"><thead><tr><th>Preço (R$)</th><th>Deságio</th><th>TIR</th></tr></thead><tbody></tbody></table>
+        <table class="sens" id="tblSensPreco"><thead><tr><th>Preço (R$)</th><th>Deságio</th><th>TIR</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="panel">
+        <h2 class="sec">Sensibilidade — TIR × prazo</h2>
+        <table class="sens" id="tblSensPrazo"><thead><tr><th>Prazo (m)</th><th>Pagamento</th><th>TIR</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="panel hide" id="panelSensEo">
+        <h2 class="sec">Sensibilidade — TIR × earn-out</h2>
+        <table class="sens" id="tblSensEo"><thead><tr><th>Fator %EO</th><th>TIR</th></tr></thead><tbody></tbody></table>
       </div>
     </div>
   </div>
@@ -347,7 +354,12 @@ const FER = new Set(window.FERIADOS);
 let MODO = "avista";
 const $ = (id)=>document.getElementById(id);
 const num = (id)=>parseFloat($(id).value)||0;
-const fmtBRL = (v)=> (v||0).toLocaleString('pt-BR',{maximumFractionDigits:0});
+const fmtBRL = (v)=> (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const parseMoney = (s)=>{ s=String(s).replace(/\./g,'').replace(',','.').replace(/[^0-9.\-]/g,''); return parseFloat(s)||0; };
+const money = (id)=>parseMoney($(id).value);
+function maskMoney(el){ let s=el.value.replace(/[^\d,]/g,''); const hasC=s.indexOf(',')>=0;
+  const p=s.split(','); let intp=p[0].replace(/^0+(?=\d)/,''); const dec=(p[1]||'').slice(0,2);
+  intp=intp.replace(/\B(?=(\d{3})+(?!\d))/g,'.'); el.value=(intp||'0')+(hasC?(','+dec):''); }
 
 const JAN_DEF = [[0,12,70],[13,24,70],[25,31,70],[32,10000,70]];
 function renderJanelas(){
@@ -363,7 +375,7 @@ function renderLevas(){
   const tb=$('tblLevas').querySelector('tbody'); tb.innerHTML='';
   LEVAS.forEach((l,i)=>{ const tr=document.createElement('tr');
     tr.innerHTML=`<td><input type=date value="${l[0]}" onchange="LEVAS[${i}][0]=this.value;recalc()"></td>
-      <td><input type=number value=${l[1]} oninput="LEVAS[${i}][1]=+this.value;recalc()"></td>
+      <td><input type=text inputmode=decimal value="${fmtBRL(l[1])}" oninput="maskMoney(this);LEVAS[${i}][1]=parseMoney(this.value);recalc()"></td>
       <td><button class=btn onclick="LEVAS.splice(${i},1);renderLevas();recalc()">×</button></td>`;
     tb.appendChild(tr); });
 }
@@ -379,13 +391,14 @@ function sync(){ // mostra/esconde conforme switches
   $('boxLevas').classList.toggle('hide', MODO!=='parcelado');
   $('boxEo').classList.toggle('hide', !eo);
   $('boxAcordo').classList.toggle('hide', !ac);
+  $('panelSensEo').classList.toggle('hide', !eo);
   recalc();
 }
 function readInputs(){
-  const levas = (MODO==='avista') ? [{date:SNAP.data_base, valor:num('preco')}]
+  const levas = (MODO==='avista') ? [{date:SNAP.data_base, valor:money('preco')}]
                                   : LEVAS.map(l=>({date:l[0], valor:l[1]}));
   return { ehPrecatorio:$('ehPrec').checked, modo:MODO, temEarnout:$('temEo').checked, temAcordo:$('temAc').checked,
-    face:num('face'), viraMeses:num('viraMeses'), prazoMeses:num('prazo'),
+    face:money('face'), viraMeses:num('viraMeses'), prazoMeses:num('prazo'),
     corrIdx:$('corrIdx').value, corrSpread:num('corrSpread')/100, corrPre:num('corrPre')/100,
     levas, acordoFator:num('acFator')/100, acordoPrazo:num('acPrazo'),
     eoIdx:$('eoIdx').value, eoSpread:num('eoSpread')/100,
@@ -401,39 +414,45 @@ function recalc(){
   $('rMoic').textContent=o.moic.toFixed(2)+'x';
   $('rPrazo').textContent=o.prazoMedio.toFixed(0);
   $('rData').textContent=o.dataPagamento;
-  // sensibilidade TIR × preço
-  const tb=$('tblSens').querySelector('tbody'); tb.innerHTML='';
+  // ---- sensibilidades ----
+  const f2=(x)=>(x*100).toFixed(2)+'%';
+  let tb;
+  // TIR × preço
+  tb=$('tblSensPreco').querySelector('tbody'); tb.innerHTML='';
   [0.8,0.9,1.0,1.1,1.2].forEach(f=>{
-    const inp2=Object.assign({},inp,{sensPricef:f});
-    const o2=PrecatEngine.price(inp2,SNAP,FER);
+    const o2=PrecatEngine.price(Object.assign({},inp,{sensPricef:f}),SNAP,FER);
     const preco=o.preco*f, des=inp.face? 1-preco/inp.face:0;
     const tr=document.createElement('tr'); if(Math.abs(f-1)<1e-9) tr.className='basecase';
-    tr.innerHTML=`<td>${fmtBRL(preco)}</td><td>${(des*100).toFixed(1)}%</td><td>${(o2.tir*100).toFixed(2)}%</td>`;
+    tr.innerHTML=`<td>${fmtBRL(preco)}</td><td>${(des*100).toFixed(1)}%</td><td>${f2(o2.tir)}</td>`;
     tb.appendChild(tr);
   });
-}
-function selftest(){
-  // casos de referência embutidos (Excel via COM): nome -> [over, tirEsperada]
-  const mk=(over)=>Object.assign({ ehPrecatorio:false,modo:"avista",temEarnout:true,temAcordo:false,
-    face:40000000,viraMeses:72,prazoMeses:6,corrIdx:"IPCA",corrSpread:0.02,corrPre:0.08,
-    levas:[{date:SNAP.data_base,valor:5000000}],acordoFator:0.6,acordoPrazo:6,eoIdx:"CDI",eoSpread:0.15,
-    eoJanelas:[{de:0,ate:12,pct:0.7},{de:13,ate:24,pct:0.7},{de:25,ate:31,pct:0.7},{de:32,ate:10000,pct:0.7}],
-    eo2Valor:0,eo2Mes:18,sensPricef:1,sensPrazoDelta:0}, over);
-  const CASES=[
-    ["base",mk({}),0.3628315150737763],
-    ["acordo",mk({temAcordo:true}),0.3099017],
-    ["eo_off",mk({temEarnout:false}),0.4168350],
-    ["parcelado",mk({modo:"parcelado",levas:[{date:"2026-06-23",valor:3000000},{date:"2027-06-23",valor:2000000}]}),0.3878780],
-  ];
-  let ok=true, msg=[];
-  for(const [nome,inp,exp] of CASES){ const t=PrecatEngine.price(inp,SNAP,FER).tir; const d=Math.abs(t-exp);
-    if(d>1e-4) ok=false; msg.push(`${nome} ${d<1e-4?'✓':'✗'}`); }
-  const el=$('selftest'); el.className='selftest '+(ok?'ok':'bad');
-  el.textContent='self-test motor vs Excel: '+msg.join('  ')+(ok?'  — OK':'  — FALHOU');
+  // TIR × prazo (Δ meses; sob acordo varia o prazo do acordo)
+  const basePrazo = inp.temAcordo ? inp.acordoPrazo : inp.prazoMeses;
+  tb=$('tblSensPrazo').querySelector('tbody'); tb.innerHTML='';
+  [-6,0,6,12,18,24].forEach(d=>{
+    const p=basePrazo+d;
+    const inp2 = inp.temAcordo ? Object.assign({},inp,{acordoPrazo:p})
+                               : Object.assign({},inp,{sensPrazoDelta:d});
+    const o2=PrecatEngine.price(inp2,SNAP,FER);
+    const tr=document.createElement('tr'); if(d===0) tr.className='basecase';
+    tr.innerHTML=`<td>${p}</td><td>${o2.dataPagamento}</td><td>${f2(o2.tir)}</td>`;
+    tb.appendChild(tr);
+  });
+  // TIR × earn-out (fator aplicado aos % das janelas) — só quando há earn-out
+  if(inp.temEarnout){
+    tb=$('tblSensEo').querySelector('tbody'); tb.innerHTML='';
+    [0,0.5,1.0,1.5,2.0].forEach(fac=>{
+      const jan=(inp.eoJanelas||[]).map(w=>({de:w.de,ate:w.ate,pct:w.pct*fac}));
+      const o2=PrecatEngine.price(Object.assign({},inp,{eoJanelas:jan}),SNAP,FER);
+      const tr=document.createElement('tr'); if(Math.abs(fac-1)<1e-9) tr.className='basecase';
+      tr.innerHTML=`<td>${fac.toFixed(1)}×</td><td>${f2(o2.tir)}</td>`;
+      tb.appendChild(tr);
+    });
+  }
 }
 window.addEventListener('DOMContentLoaded',()=>{
   $('curvalbl').textContent='Curva ETTJ '+SNAP.data_base;
-  renderLevas(); renderJanelas(); selftest(); sync();
+  renderLevas(); renderJanelas(); sync();
 });
 </script>
 </body>
