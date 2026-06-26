@@ -49,9 +49,9 @@
     input,select{font-size:11px;padding:4px 6px;}
     .suffix{font-size:10px;}
     input[type=number],input[inputmode=decimal]{width:98px;}
-    input[type=date]{width:106px;}
+    input[type=date]{width:160px;}  /* celular: formato longo do iOS ("25 de jun. de 2026") cabe sem cortar o ano */
     .panel .field > span > .suffix:last-child{width:42px;}
-    .panel .field > span > input:last-child{margin-right:46px;}
+    .panel .field > span > input:last-child{margin-right:46px;}  /* data mantém a borda direita alinhada; alarga p/ a esquerda */
     .seg button{padding:4px 9px;font-size:10px;}
     h1{font-size:30px;}
   }
