@@ -158,6 +158,9 @@
       <div class="panel">
         <h2 class="sec">Resultado</h2>
         <div class="res"><span class="k">TIR (a.a.)<span class="help" title="Taxa interna de retorno anual do fluxo (XIRR), base 365.">i</span></span><span class="v big" id="rTir">—</span></div>
+        <div class="res"><span class="k">Retorno simples (a.a.)<span class="help" title="Retorno linear (juros simples): (recebido líquido/preço − 1) ÷ prazo. O precatório corrige a IPCA+2% em juros simples, então esta é a base da decomposição IPCA+PRÉ. Difere da TIR (XIRR/composta) acima, sobretudo em prazos curtos com deságio alto.">i</span></span><span class="v" id="rSimples">—</span></div>
+        <div class="res sub"><span class="k">↳ IPCA (a.a.)<span class="help" title="Componente de inflação da correção (IPCA médio da operação).">i</span></span><span class="v" id="rIpcaDec">—</span></div>
+        <div class="res sub"><span class="k">↳ PRÉ (a.a.)<span class="help" title="Juro real = retorno simples − IPCA. No sem-deságio = o spread (2%); com deságio sobe (mostra quanto o preço de compra está ajudando).">i</span></span><span class="v" id="rPre">—</span></div>
         <div class="res"><span class="k">Preço total</span><span class="v" id="rPreco">—</span></div>
         <div class="res"><span class="k">Deságio<span class="help" title="Sobre o valor de face NOMINAL de hoje (1 − preço/face). Não é deságio sobre o montante a receber no pagamento.">i</span></span><span class="v" id="rDes">—</span></div>
         <div class="res"><span class="k">MOIC<span class="help" title="Múltiplo sobre o capital: total recebido ÷ preço pago.">i</span></span><span class="v" id="rMoic">—</span></div>
@@ -342,6 +345,7 @@ function price(inp, snap, ferSet){
   const hurBoP = [], hurEoP = [];
   const r42 = []; const dates42 = [];
   let accJur = 0; // soma de juros acruados do precatório (p/ Juros Pagos no bullet)
+  let cIpcaFrac = 0; // fração de IPCA da correção (juros simples) = Σ IPCA[m]*dc/365, p/ decompor PRÉ/IPCA
   let earnoutPago = 0, recebidoBrutoBullet = 0, earnoutPctBase = 0; // p/ composição e sensibilidade
   for (let m = 1; m <= NMONTHS; m++){
     // precatório
@@ -352,8 +356,10 @@ function price(inp, snap, ferSet){
       // se JÁ é precatório, corrige por IPCA+spread desde o mês 1 (sem fase pré); senão pré até vira_data
       if (!inp.ehPrecatorio && serial(date[m]) <= sVira)
         jur = (idxRate(inp.corrPreIdx || "Pré", m, "corr") + inp.corrPre) * dc[m] / 365 * face;  // pré-precatório (índice + taxa)
-      else
+      else {
         jur = (idxRate(inp.corrIdx, m, "corr") + inp.corrSpread) * dc[m] / 365 * face;            // pós-precatório (índice + spread)
+        cIpcaFrac += idxRate(inp.corrIdx, m, "corr") * dc[m] / 365;  // só a parte de IPCA (sem spread)
+      }
     }
     precJur[m] = jur; accJur += jur;
     const isBullet = serial(date[m]) === sBullet;
@@ -391,13 +397,22 @@ function price(inp, snap, ferSet){
   let num = 0, den = 0;
   for (let m = 1; m <= NMONTHS; m++){ if (r42[m] > 0){ num += m * r42[m]; den += r42[m]; } }
   const prazoMedio = den ? num / den : 0;
+  // decomposição em JUROS SIMPLES (o precatório corrige a IPCA+spread linear, não composto):
+  // Retorno simples a.a. = (recebido líquido/preço − 1)/T ; IPCA = correção média de IPCA/T ; PRÉ = simples − IPCA
+  // No sem-deságio (precatório) PRÉ = exatamente o spread; com deságio o PRÉ sobe (ganho da compra barata).
+  const recLiq = recebidoBrutoBullet - earnoutPago;
+  const Tanos = (serial(bullet) - serial(base)) / 365;            // prazo da operação em anos (início -> pagamento)
+  const ipcaSimples = Tanos > 0 ? cIpcaFrac / Tanos : 0;
+  const retornoSimples = (Tanos > 0 && precoPago) ? (recLiq / precoPago - 1) / Tanos : 0;
+  const preSimples = retornoSimples - ipcaSimples;
 
   return { tir, preco: precoPago, desagio, moic, prazoMedio,
            dataPagamento: bullet.toISOString().slice(0, 10),
            jurosPagos: accJur, faceCorrigido: face + accJur,
            earnoutPago, recebidoBrutoBullet, earnoutPctBase,
-           recebidoLiquidoBullet: recebidoBrutoBullet - earnoutPago,
+           recebidoLiquidoBullet: recLiq,
            ipcaImplicito: ipcaN ? ipcaSum / ipcaN : 0,
+           retornoSimples, ipcaSimples, preSimples,
            fluxo: cfs.map((c, i) => ({ date: dts[i].toISOString().slice(0, 10), cf: c })) };
 }
 
@@ -521,13 +536,16 @@ function recalc(){
   const somaLevas = inp.levas.reduce((s,l)=>s+(l.valor||0),0);
   const efPrazo = inp.temAcordo ? inp.acordoPrazo : inp.prazoMeses;
   if(!(inp.face>0) || !(somaLevas>0) || !(efPrazo>0)){
-    ['rTir','rPreco','rDes','rMoic','rPrazo','rData','cFace','cJuros','cFaceC','cFator','cEo','cRecLiq','cPreco'].forEach(id=>$(id).textContent='—');
+    ['rTir','rSimples','rIpcaDec','rPre','rPreco','rDes','rMoic','rPrazo','rData','cFace','cJuros','cFaceC','cFator','cEo','cRecLiq','cPreco'].forEach(id=>$(id).textContent='—');
     updateIpcaImpl(inp);   // IPCA implícito ainda aparece (depende só da curva+prazo), não força 0
     $('tblSensX').querySelector('thead').innerHTML=''; ['tblSensX','tblSensEo'].forEach(id=>$(id).querySelector('tbody').innerHTML='');
     return;
   }
   const o=PrecatEngine.price(inp, SNAP, FER);
   $('rTir').textContent=(o.tir*100).toFixed(2)+'%';
+  $('rSimples').textContent=(o.retornoSimples*100).toFixed(1)+'%';
+  $('rIpcaDec').textContent=(o.ipcaSimples*100).toFixed(2)+'%';
+  $('rPre').textContent=(o.preSimples*100).toFixed(1)+'%';
   $('rPreco').textContent=fmtBRL(o.preco);
   $('rDes').textContent=(o.desagio*100).toFixed(1)+'%';
   $('rMoic').textContent=o.moic.toFixed(2)+'x';
