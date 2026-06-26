@@ -219,7 +219,7 @@
   <section class="docfoot noprint">
     <div class="field"><label>Nome do crédito (DIU)<span class="help" title="Nome que identifica o crédito/legal claim. Vira o título no PDF impresso.">i</span></label><span><input type="text" id="docNome" oninput="updateDocTitle()" placeholder="ex.: Crédito de Fulano de Tal"></span></div>
     <div class="field"><label>Data do cálculo<span class="help" title="Data em que o cálculo foi feito. Compõe o título no PDF impresso.">i</span></label><span><input type="date" id="docData" oninput="updateDocTitle()"></span></div>
-    <div class="docbtns"><button class="btn" onclick="copiarLink()">copiar link do cenário</button><button class="btn" onclick="window.print()">imprimir / PDF</button></div>
+    <div class="docbtns"><button class="btn" onclick="exportarXlsx()">exportar xlsx</button><button class="btn" onclick="copiarLink()">copiar link do cenário</button><button class="btn" onclick="window.print()">imprimir / PDF</button></div>
   </section>
 
   <footer>
@@ -335,7 +335,7 @@ function price(inp, snap, ferSet){
   const precoPago = levas.reduce((s, l) => s + (l.valor || 0), 0) * pricef; // C34
 
   // timeline meses 1..NMONTHS
-  const date = [], dc = [], du = [], Pre = [], JR = [], IPCA = [], FRA = [];
+  const date = [], dc = [], du = [], Pre = [], JR = [], IPCA = [], FRA = [], ten = [];
   let cumDu = [0];
   for (let m = 1; m <= NMONTHS; m++){
     const me = eomonth(base, m - 1);          // fim do mês m
@@ -345,6 +345,7 @@ function price(inp, snap, ferSet){
     du[m] = businessDays(pe, me, ferSet);
     cumDu[m] = cumDu[m - 1] + du[m];
     const t = (serial(me) - serial(curveBase)) / 360; // tenor SEMPRE da data-base da ETTJ
+    ten[m] = t;
     Pre[m] = svensson(t, pre);
     JR[m] = svensson(t, ipca);
     const bk = (1 + Pre[m]) / (1 + JR[m]) - 1;                       // IPCA breakeven implícito (curva)
@@ -378,6 +379,8 @@ function price(inp, snap, ferSet){
   const precBoP = [], precJur = [], precPMT = [], precEoP = [];
   const hurBoP = [], hurEoP = [];
   const r42 = []; const dates42 = [];
+  const linhas = [];   // detalhamento mês a mês p/ exportação (checagem micro)
+  let bulletIdx = 1;
   let accJur = 0; // soma de juros acruados do precatório (p/ Juros Pagos no bullet)
   let cIpcaFrac = 0; // fração de IPCA da correção (juros simples) = Σ IPCA[m]*dc/365, p/ decompor PRÉ/IPCA
   let dcCorrFrac = 0; // fração de tempo (Σ dc/365) da janela de correção, p/ a IPCA MÉDIA aplicada (= IPCA da ETTJ)
@@ -419,9 +422,22 @@ function price(inp, snap, ferSet){
     // fluxo (r42)
     const recebido = inp.temAcordo ? precPMT[m] * inp.acordoFator : precPMT[m];
     earnoutPago += r63 + r64;
-    if (isBullet) { recebidoBrutoBullet = recebido; earnoutPctBase = pctJanela(m); }
-    r42[m] = recebido - r63 - r64 - desemb(m) * pricef;
+    if (isBullet) { recebidoBrutoBullet = recebido; earnoutPctBase = pctJanela(m); bulletIdx = m; }
+    const des = desemb(m) * pricef;
+    r42[m] = recebido - r63 - r64 - des;
     dates42[m] = date[m];
+
+    // linha de detalhamento (read-only; não afeta a matemática)
+    const naCorr = sBullet >= serial(date[m]);
+    let txIdx = 0, txTot = 0;
+    if (naCorr){
+      if (!inp.ehPrecatorio && serial(date[m]) <= sVira){ txIdx = idxRate(inp.corrPreIdx || "Pré", m, "corr"); txTot = txIdx + inp.corrPre; }
+      else { txIdx = idxRate(inp.corrIdx, m, "corr"); txTot = txIdx + inp.corrSpread; }
+    }
+    linhas[m] = { m, sdate: serial(date[m]), data: date[m].toISOString().slice(0,10),
+      tenor: ten[m], preSpot: Pre[m], jurosReal: JR[m], ipca: IPCA[m],
+      dc: dc[m], du: du[m], txIdx, txTot, juros: jur, jurosPago: jurPagos, amort,
+      bop: precBoP[m], eop: precEoP[m], earnout: r63 + r64, desembolso: des, fluxo: r42[m] };
   }
 
   const cfs = r42.slice(1), dts = dates42.slice(1);
@@ -461,7 +477,15 @@ function price(inp, snap, ferSet){
            recebidoLiquidoBullet: recLiq,
            ipcaImplicito: ipcaSimples,   // a IPCA média aplicada = a linha IPCA da decomposição (mesmo número)
            ipcaSimples, spreadSimples, correcaoSimples, preComposto,
-           fluxo: cfs.map((c, i) => ({ date: dts[i].toISOString().slice(0, 10), cf: c })) };
+           fluxo: cfs.map((c, i) => ({ date: dts[i].toISOString().slice(0, 10), cf: c })),
+           // detalhamento p/ exportação xlsx (checagem micro de cada linha calculada)
+           detalhe: {
+             curva: { dataBase: snap.data_base, preParams: pre, ipcaRealParams: ipca },
+             linhas: linhas.slice(1).filter(r => r && (r.sdate <= sBullet || r.fluxo !== 0 || r.earnout !== 0)),
+             comp: { face, causa, correcaoTotal: accJur, faceCorrigido: face + accJur,
+                     fatorAcordo: fatorAc, earnoutPago, recebidoLiquido: recLiq, preco: precoPago,
+                     desagio, tir, correcaoSimples, ipcaSimples, spreadSimples, preComposto,
+                     prazoMedio, Teff, dataPagamento: bullet.toISOString().slice(0, 10) } } };
 }
 
 const API = { svensson, serial, eomonth, days, businessDays, xirr, price, parseDate, buildLevas };
@@ -705,6 +729,88 @@ function copiarLink(){
   (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject())
     .then(()=>toast('Link do cenário copiado'))
     .catch(()=>{ prompt('Copie o link do cenário:', url); });
+}
+
+// ---- gerador de .xlsx em JS puro (sem dependência; zip STORE + XML) ----
+const _CRC=(function(){const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c>>>0;}return t;})();
+function _crc32(b){let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=_CRC[(c^b[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+function _u8(s){return new TextEncoder().encode(s);}
+function _xesc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function _col(n){let s='';while(n>0){const r=(n-1)%26;s=String.fromCharCode(65+r)+s;n=Math.floor((n-1)/26);}return s;}
+function _sheetXml(rows){
+  let body='';
+  rows.forEach((row,ri)=>{const r=ri+1;let cells='';
+    (row||[]).forEach((v,ci)=>{const ref=_col(ci+1)+r;
+      if(v==null||v==='')return;
+      if(typeof v==='number'&&isFinite(v))cells+='<c r="'+ref+'"><v>'+v+'</v></c>';
+      else cells+='<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+_xesc(v)+'</t></is></c>';});
+    body+='<row r="'+r+'">'+cells+'</row>';});
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+body+'</sheetData></worksheet>';
+}
+function makeXlsx(sheets){
+  const files=[];
+  files.push(['[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+sheets.map((s,i)=>'<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join('')+'</Types>']);
+  files.push(['_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>']);
+  files.push(['xl/workbook.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheets.map((s,i)=>'<sheet name="'+_xesc(s.name)+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join('')+'</sheets></workbook>']);
+  files.push(['xl/_rels/workbook.xml.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sheets.map((s,i)=>'<Relationship Id="rId'+(i+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>').join('')+'</Relationships>']);
+  sheets.forEach((s,i)=>files.push(['xl/worksheets/sheet'+(i+1)+'.xml',_sheetXml(s.rows)]));
+  const chunks=[];let offset=0;const central=[];
+  const le16=n=>[n&0xFF,(n>>>8)&0xFF], le32=n=>{n>>>=0;return [n&0xFF,(n>>>8)&0xFF,(n>>>16)&0xFF,(n>>>24)&0xFF];};
+  const push=b=>{chunks.push(b);offset+=b.length;};
+  files.forEach(([name,content])=>{
+    const nameB=_u8(name),dataB=_u8(content),crc=_crc32(dataB),localOff=offset;
+    push(new Uint8Array([].concat(le32(0x04034b50),le16(20),le16(0),le16(0),le16(0),le16(0),le32(crc),le32(dataB.length),le32(dataB.length),le16(nameB.length),le16(0))));
+    push(nameB);push(dataB);central.push({nameB,crc,len:dataB.length,localOff});});
+  const cdStart=offset;let cd=[];
+  central.forEach(e=>{cd=cd.concat(le32(0x02014b50),le16(20),le16(20),le16(0),le16(0),le16(0),le16(0),le32(e.crc),le32(e.len),le32(e.len),le16(e.nameB.length),le16(0),le16(0),le16(0),le16(0),le32(0),le32(e.localOff));for(let i=0;i<e.nameB.length;i++)cd.push(e.nameB[i]);});
+  push(new Uint8Array(cd));
+  push(new Uint8Array([].concat(le32(0x06054b50),le16(0),le16(0),le16(files.length),le16(files.length),le32(offset-cdStart),le32(cdStart),le16(0))));
+  let total=0;chunks.forEach(c=>total+=c.length);
+  const out=new Uint8Array(total);let p=0;chunks.forEach(c=>{out.set(c,p);p+=c.length;});return out;
+}
+function downloadXlsx(filename,sheets){
+  const blob=new Blob([makeXlsx(sheets)],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;
+  document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},100);
+}
+function exportarXlsx(){
+  const inp=readInputs();
+  const somaLevas=inp.levas.reduce((s,l)=>s+(l.valor||0),0);
+  const efPrazo=inp.temAcordo?inp.acordoPrazo:inp.prazoMeses;
+  if(!(inp.face>0)||!(somaLevas>0)||!(efPrazo>0)){toast('Preencha face, preço e prazo antes de exportar');return;}
+  const o=PrecatEngine.price(inp,SNAP,FER), d=o.detalhe, c=d.comp;
+  const nome=($('docNome').value||'').trim()||'precatorio', dataCalc=$('docData').value||'';
+  const prem=[['CALCULADORA LEGAL CLAIM — EXPORTAÇÃO (checagem)'],[],
+    ['Nome do crédito (DIU)',nome],['Data do cálculo',dataCalc],['Curva ETTJ (data-base)',d.curva.dataBase],[],
+    ['Tipo',inp.ehPrecatorio?'Precatório':'Direito creditório'],['Modo de pagamento',inp.modo==='parcelado'?'Parcelado':'À vista'],
+    ['Earn-out',inp.temEarnout?'Sim':'Não'],['Acordo',inp.temAcordo?'Sim':'Não'],[],
+    ['Valor de face (R$)',inp.face],['Valor da causa (R$)',c.causa],['Valor a pagar (R$)',somaLevas],
+    ['Data de início',inp.dataInicio||d.curva.dataBase],['Vira precatório em (meses)',inp.viraMeses],
+    ['Correção pré (% a.a., decimal)',inp.corrPre],['Prazo até pagamento (meses)',inp.prazoMeses],
+    ['Correção precatório — índice',inp.corrIdx],['Correção precatório — spread (decimal)',inp.corrSpread],
+    ['IPCA',(inp.ipcaOverride!=null)?('Manual '+inp.ipcaOverride):'ETTJ (implícito)']];
+  const P=d.curva.preParams,I=d.curva.ipcaRealParams;
+  const curva=[['CURVA ETTJ — PARÂMETROS SVENSSON (data-base '+d.curva.dataBase+')'],[],
+    ['','beta1','beta2','beta3','beta4','lambda1','lambda2'],
+    ['Pré (nominal)',P.b1,P.b2,P.b3,P.b4,P.l1,P.l2],['Juros real (IPCA)',I.b1,I.b2,I.b3,I.b4,I.l1,I.l2],[],
+    ['IPCA implícito = (1+Pré)/(1+JurosReal) − 1, no tenor de cada mês (taxas em decimal a.a.):'],[],
+    ['Mês','Data','Tenor (anos)','Pré spot','Juros real spot','IPCA implícito']];
+  d.linhas.forEach(r=>curva.push([r.m,r.data,r.tenor,r.preSpot,r.jurosReal,r.ipca]));
+  const fluxo=[['FLUXO MENSAL — SUB-LEDGER DO PRECATÓRIO (taxas decimais a.a.; valores em R$)'],[],
+    ['Mês','Data','Dias corr.','Dias úteis','Índice corr.','Taxa corr. (idx+spread)','Juros acruado','Juros pago','Amortização','Precat. início','Precat. fim','Earn-out pago','Desembolso','Fluxo líquido']];
+  d.linhas.forEach(r=>fluxo.push([r.m,r.data,r.dc,r.du,r.txIdx,r.txTot,r.juros,r.jurosPago,r.amort,r.bop,r.eop,r.earnout,r.desembolso,r.fluxo]));
+  const comp=[['COMPOSIÇÃO DO RECEBIMENTO & RESULTADO'],[],
+    ['Valor de face (R$)',c.face],['(+) Correção até o pagamento (R$)',c.correcaoTotal],['(=) Face corrigido (R$)',c.faceCorrigido],
+    ['(×) Fator de acordo',c.fatorAcordo],['(−) Earn-out pago (R$)',c.earnoutPago],['(=) Recebido líquido (R$)',c.recebidoLiquido],
+    ['Preço pago (R$)',c.preco],['Deságio',c.desagio],[],
+    ['TIR (a.a.)',c.tir],['IPCA + 2% (a.a., juros simples)',c.correcaoSimples],['  ↳ IPCA (a.a.)',c.ipcaSimples],
+    ['  ↳ spread (a.a.)',c.spreadSimples],['PRÉ (a.a., juros compostos)',c.preComposto],
+    ['Prazo (anos, desembolso→pagamento)',c.Teff],['Pagamento em',c.dataPagamento]];
+  const safe=nome.replace(/[^\w\-]+/g,'_').slice(0,40)||'precatorio';
+  downloadXlsx('legal-claim_'+safe+'.xlsx',[
+    {name:'Premissas',rows:prem},{name:'Curva ETTJ IPCA',rows:curva},
+    {name:'Fluxo mensal',rows:fluxo},{name:'Composição',rows:comp}]);
+  toast('Planilha exportada');
 }
 
 window.addEventListener('DOMContentLoaded',()=>{
