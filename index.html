@@ -77,7 +77,10 @@
   .subhdr{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold);font-weight:600;margin:12px 0 2px;padding-top:9px;border-top:1px dotted var(--rule);}
   .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:12px;padding:8px 16px;border-radius:4px;opacity:0;transition:.2s;pointer-events:none;font-family:'Inter';z-index:9;}
   .toast.show{opacity:1;}
-  @media print{ .noprint{display:none!important;} body{background:#fff;} .panel{break-inside:avoid;} .wrap{padding:0;} }
+  @media print{ .noprint{display:none!important;} body{background:#fff;} .panel{break-inside:avoid;} .wrap{padding:0;}
+    /* garante que os fundos (botão selecionado em dourado etc.) saiam na impressão/PDF */
+    *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+    .seg{border-color:#000;} .seg button.on{background:var(--gold)!important;color:#fff!important;} }
 </style>
 </head>
 <body>
@@ -94,12 +97,12 @@
     <div>
       <div class="panel">
         <h2 class="sec">Configuração</h2>
-        <div class="field"><label>É precatório?</label>
-          <label class="sw"><input type="checkbox" id="ehPrec" onchange="sync()"><span class="sl"></span></label></div>
-        <div class="field"><label>Há earn-out?</label>
-          <label class="sw"><input type="checkbox" id="temEo" onchange="sync()"><span class="sl"></span></label></div>
-        <div class="field"><label>Há acordo?</label>
-          <label class="sw"><input type="checkbox" id="temAc" onchange="sync()"><span class="sl"></span></label></div>
+        <div class="field"><label>Tipo de crédito</label>
+          <span class="seg"><button id="tDC" class="on" onclick="setTipo('dc')">Direito creditório</button><button id="tPrec" onclick="setTipo('prec')">Precatório</button></span></div>
+        <div class="field"><label>Earn-out</label>
+          <span class="seg"><button id="eoNao" class="on" onclick="setEo('nao')">Não</button><button id="eoSim" onclick="setEo('sim')">Sim</button></span></div>
+        <div class="field"><label>Acordo</label>
+          <span class="seg"><button id="acNao" class="on" onclick="setAc('nao')">Não</button><button id="acSim" onclick="setAc('sim')">Sim</button></span></div>
         <div class="field"><label>Pagamento</label>
           <span class="seg"><button id="mAvista" class="on" onclick="setModo('avista')">À vista</button><button id="mParc" onclick="setModo('parcelado')">Parcelado</button></span></div>
       </div>
@@ -460,10 +463,15 @@ function renderJanelas(){
     tb.appendChild(tr); });
 }
 function setModo(m){ MODO=m; $('mAvista').classList.toggle('on',m==='avista'); $('mParc').classList.toggle('on',m==='parcelado'); sync(); }
+// tipo de crédito / earn-out / acordo como segmentado (2 botões) em vez de switch on/off
+let EHPREC=false, TEMEO=false, TEMAC=false;
+function setTipo(v){ EHPREC=(v==='prec'); $('tDC').classList.toggle('on',!EHPREC); $('tPrec').classList.toggle('on',EHPREC); sync(); }
+function setEo(v){ TEMEO=(v==='sim'); $('eoNao').classList.toggle('on',!TEMEO); $('eoSim').classList.toggle('on',TEMEO); sync(); }
+function setAc(v){ TEMAC=(v==='sim'); $('acNao').classList.toggle('on',!TEMAC); $('acSim').classList.toggle('on',TEMAC); sync(); }
 function toggleAdv(){ $('advBody').classList.toggle('hide'); $('advH').classList.toggle('open'); }
 
-function sync(){ // mostra/esconde conforme switches
-  const ehP=$('ehPrec').checked, eo=$('temEo').checked, ac=$('temAc').checked;
+function sync(){ // mostra/esconde conforme os segmentados
+  const ehP=EHPREC, eo=TEMEO, ac=TEMAC;
   $('hdrPreFase').classList.toggle('hide', ehP);
   $('rowVira').classList.toggle('hide', ehP);
   $('rowPre').classList.toggle('hide', ehP);
@@ -479,7 +487,7 @@ function readInputs(){
   const levas = (MODO==='avista')
     ? PrecatEngine.buildLevas('avista', di, V, 1)
     : PrecatEngine.buildLevas('parcelado', di, V, Math.max(1, num('nParcelas')));
-  return { ehPrecatorio:$('ehPrec').checked, modo:MODO, temEarnout:$('temEo').checked, temAcordo:$('temAc').checked,
+  return { ehPrecatorio:EHPREC, modo:MODO, temEarnout:TEMEO, temAcordo:TEMAC,
     face:money('face'), viraMeses:num('viraMeses'), prazoMeses:num('prazo'),
     corrIdx:"IPCA", corrSpread:num('corrSpread')/100,
     corrPreIdx:$('corrPreIdx').value, corrPre:num('corrPre')/100,
@@ -598,7 +606,7 @@ function goalSeek(){
 
 // ---- cenário <-> URL ----
 function buildState(){
-  return { ehP:$('ehPrec').checked, eo:$('temEo').checked, ac:$('temAc').checked, modo:MODO,
+  return { ehP:EHPREC, eo:TEMEO, ac:TEMAC, modo:MODO,
     face:$('face').value, vira:num('viraMeses'), prazo:num('prazo'),
     cs:num('corrSpread'), cpi:$('corrPreIdx').value, cp:num('corrPre'),
     im:IPCAMODE, iv:num('ipcaVal'), vp:$('valorPagar').value, di:$('dataInicio').value, np:num('nParcelas'), ta:num('tirAlvo'),
@@ -606,7 +614,7 @@ function buildState(){
     jan:JAN_DEF };
 }
 function applyState(s){ try{
-  $('ehPrec').checked=!!s.ehP; $('temEo').checked=!!s.eo; $('temAc').checked=!!s.ac;
+  EHPREC=!!s.ehP; TEMEO=!!s.eo; TEMAC=!!s.ac;
   $('face').value=s.face; $('viraMeses').value=s.vira; $('prazo').value=s.prazo;
   $('corrSpread').value=s.cs; if(s.cpi)$('corrPreIdx').value=s.cpi; $('corrPre').value=s.cp;
   $('ipcaVal').value=s.iv; $('valorPagar').value=s.vp||s.preco||'0,00'; if(s.di)$('dataInicio').value=s.di; if(s.np)$('nParcelas').value=s.np; $('tirAlvo').value=s.ta;
@@ -627,7 +635,10 @@ window.addEventListener('DOMContentLoaded',()=>{
   $('curvalbl').textContent='Curva ETTJ '+SNAP.data_base;
   const c=new URLSearchParams(location.search).get('c');
   if(c){ const s=decodeState(c); if(s) applyState(s); }
-  // reflete modo de pagamento e IPCA restaurados nos controles
+  // reflete os segmentados (tipo/earn-out/acordo/pagamento/IPCA) restaurados nos controles
+  $('tDC').classList.toggle('on',!EHPREC); $('tPrec').classList.toggle('on',EHPREC);
+  $('eoNao').classList.toggle('on',!TEMEO); $('eoSim').classList.toggle('on',TEMEO);
+  $('acNao').classList.toggle('on',!TEMAC); $('acSim').classList.toggle('on',TEMAC);
   $('mAvista').classList.toggle('on',MODO==='avista'); $('mParc').classList.toggle('on',MODO==='parcelado');
   $('ipcaCurva').classList.toggle('on',IPCAMODE==='curva'); $('ipcaMan').classList.toggle('on',IPCAMODE==='manual');
   $('ipcaVal').disabled=(IPCAMODE==='curva');
