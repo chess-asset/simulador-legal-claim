@@ -88,6 +88,11 @@
   .adv-h.open::before{content:"▾ ";}
   .hide{display:none!important;}
   .levas td{padding:3px 4px;} .levas input{width:108px;}
+  .parc{width:100%;border-collapse:collapse;}
+  .parc td{padding:3px 3px;}
+  .parc .pidx{color:var(--ink-mute);font-size:11px;width:26px;text-align:right;}
+  .parc input[type=date]{width:138px;}
+  .parc input[inputmode=decimal]{width:108px;text-align:right;}
   .btn{font-size:11px;padding:4px 10px;border:1px solid var(--rule-strong);background:#fff;cursor:pointer;color:var(--ink-soft);}
   footer{margin-top:30px;border-top:1px solid var(--rule);padding-top:12px;font-size:10.5px;color:var(--ink-mute);line-height:1.6;}
   .help{display:inline-block;width:13px;height:13px;line-height:12px;text-align:center;border-radius:50%;border:1px solid var(--rule-strong);color:var(--ink-mute);font-size:9px;cursor:help;margin-left:5px;font-weight:600;vertical-align:middle;}
@@ -140,8 +145,8 @@
         <h2 class="sec">Precatório</h2>
         <div class="field"><label>Valor de face<span class="help" title="Valor do precatório HOJE (na data-base) — já inclui a causa + os juros/correção acruados até hoje. É o que é amortizado no pagamento.">i</span></label><span><input type="text" inputmode="decimal" id="face" value="0,00" oninput="recalc()" onblur="maskMoney(this)"><span class="suffix">R$</span></span></div>
         <div class="field"><label>Valor da causa<span class="help" title="Principal (valor original da causa), sem os juros já acruados. O juros simples forward (IPCA+spread) incide sobre ESTE valor, não sobre o face (que já tem juros). Deixe 0 para usar o valor de face (precatório recém-inscrito).">i</span></label><span><input type="text" inputmode="decimal" id="valorCausa" value="0,00" oninput="recalc()" onblur="maskMoney(this)"><span class="suffix">R$</span></span></div>
-        <div class="field"><label>Valor a pagar<span class="help" title="Preço total da aquisição. À vista = pago de uma vez na data de início; parcelado = dividido em N parcelas iguais mensais a partir da data de início.">i</span></label><span><input type="text" inputmode="decimal" id="valorPagar" value="0,00" oninput="recalc()" onblur="maskMoney(this)"><span class="suffix">R$</span></span></div>
-        <div class="field"><label>Data de início<span class="help" title="Data em que a operação começa (correção e desembolso). Default = data-base da ETTJ. O 1º mês é pro-rata a partir dela. A curva é sempre lida pela data-base da ETTJ.">i</span></label><span><input type="date" id="dataInicio" oninput="recalc()"></span></div>
+        <div class="field"><label>Valor a pagar<span class="help" title="Preço total da aquisição. À vista = pago de uma vez na data de início; parcelado = dividido em N parcelas iguais mensais a partir da data de início.">i</span></label><span><input type="text" inputmode="decimal" id="valorPagar" value="0,00" oninput="regenParcelas();recalc()" onblur="maskMoney(this)"><span class="suffix">R$</span></span></div>
+        <div class="field"><label>Data de início<span class="help" title="Data em que a operação começa (correção e desembolso). Default = data-base da ETTJ. O 1º mês é pro-rata a partir dela. A curva é sempre lida pela data-base da ETTJ.">i</span></label><span><input type="date" id="dataInicio" oninput="regenParcelas();recalc()"></span></div>
 
         <div class="subhdr" id="hdrPreFase">Fase pré-precatório</div>
         <div class="field" id="rowVira"><label>Vira precatório em<span class="help" title="Meses até o crédito ser efetivamente inscrito como precatório. Até lá corrige pela 'Correção pré-precatório'.">i</span></label><span><input type="number" id="viraMeses" value="0" oninput="recalc()"><span class="suffix">meses</span></span></div>
@@ -160,7 +165,12 @@
 
       <div class="panel">
         <h2 class="sec">Aquisição</h2>
-        <div class="field hide" id="rowParcelas"><label>Nº de parcelas<span class="help" title="Quantas parcelas iguais mensais. O 'Valor a pagar' é dividido por este número, uma por mês a partir da data de início.">i</span></label><span><input type="number" id="nParcelas" value="1" min="1" oninput="recalc()"></span></div>
+        <div class="field hide" id="rowParcelas"><label>Nº de parcelas<span class="help" title="Quantas parcelas mensais. Preenche a tabela abaixo com N parcelas consecutivas de (Valor a pagar ÷ N); você pode editar data e valor de cada uma.">i</span></label><span><input type="number" id="nParcelas" value="1" min="1" oninput="regenParcelas();recalc()"></span></div>
+        <div id="rowParcTbl" class="hide" style="border-bottom:1px dotted var(--rule);padding:8px 0 4px;">
+          <div style="font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mute);margin:0 0 6px;">Parcelas — data e valor (edite à vontade)</div>
+          <table class="parc" id="tblParc"><tbody></tbody></table>
+          <div style="font-size:11px;color:var(--ink-soft);margin-top:7px;text-align:right;">Soma das parcelas: <b id="parcSoma" style="font-family:'IBM Plex Mono',monospace;color:var(--gold)">0,00</b></div>
+        </div>
         <div class="field"><label>TIR-alvo<span class="help" title="Resolve o 'Valor a pagar' para que a TIR fique igual à meta. Útil para definir o quanto pagar.">i</span></label><span class="gsbox"><input type="number" id="tirAlvo" value="0" step="0.5"><span class="suffix">%</span><button class="btn noprint" onclick="goalSeek()">resolver preço</button></span></div>
       </div>
 
@@ -541,6 +551,24 @@ function setIpca(m){ IPCAMODE=m;
 }
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),1800); }
 
+// parcelas editáveis (data + valor); fonte das levas quando parcelado
+let PARCELAS = [];
+function regenParcelas(){   // (re)gera N parcelas mensais de V÷N a partir da data de início
+  if(MODO!=='parcelado') return;
+  const di=$('dataInicio').value||SNAP.data_base, V=money('valorPagar'), N=Math.max(1,num('nParcelas'));
+  PARCELAS = PrecatEngine.buildLevas('parcelado', di, V, N).map(p=>({date:p.date, valor:p.valor}));
+  renderParcelas();
+}
+function renderParcelas(){
+  const tb=$('tblParc').querySelector('tbody'); if(!tb) return; tb.innerHTML='';
+  PARCELAS.forEach((p,i)=>{ const tr=document.createElement('tr');
+    tr.innerHTML=`<td class="pidx">${i+1}</td>
+      <td><input type="date" value="${p.date}" oninput="PARCELAS[${i}].date=this.value;recalc()"></td>
+      <td><input type="text" inputmode="decimal" value="${fmtBRL(p.valor)}" oninput="PARCELAS[${i}].valor=parseMoney(this.value);recalc()" onblur="maskMoney(this)"><span class=suffix>R$</span></td>`;
+    tb.appendChild(tr); });
+  const soma=PARCELAS.reduce((s,p)=>s+(p.valor||0),0);
+  if($('parcSoma')) $('parcSoma').textContent=fmtBRL(soma);
+}
 const JAN_DEF = [[0,12,0],[13,24,0],[25,31,0],[32,10000,0]];
 function renderJanelas(){
   const tb=$('tblJan').querySelector('tbody'); tb.innerHTML='';
@@ -550,7 +578,7 @@ function renderJanelas(){
       <td><input type=number value=${w[2]} oninput="JAN_DEF[${i}][2]=+this.value;recalc()"><span class=suffix>%</span></td>`;
     tb.appendChild(tr); });
 }
-function setModo(m){ MODO=m; $('mAvista').classList.toggle('on',m==='avista'); $('mParc').classList.toggle('on',m==='parcelado'); sync(); }
+function setModo(m){ MODO=m; $('mAvista').classList.toggle('on',m==='avista'); $('mParc').classList.toggle('on',m==='parcelado'); if(m==='parcelado') regenParcelas(); sync(); }
 // tipo de crédito / earn-out / acordo como segmentado (2 botões) em vez de switch on/off
 let EHPREC=false, TEMEO=false, TEMAC=false;
 function setTipo(v){ EHPREC=(v==='prec'); $('tDC').classList.toggle('on',!EHPREC); $('tPrec').classList.toggle('on',EHPREC); sync(); }
@@ -564,6 +592,7 @@ function sync(){ // mostra/esconde conforme os segmentados
   $('rowVira').classList.toggle('hide', ehP);
   $('rowPre').classList.toggle('hide', ehP);
   $('rowParcelas').classList.toggle('hide', MODO!=='parcelado');
+  $('rowParcTbl').classList.toggle('hide', MODO!=='parcelado');
   $('boxEo').classList.toggle('hide', !eo);
   $('boxAcordo').classList.toggle('hide', !ac);
   $('panelSensEo').classList.toggle('hide', !eo);
@@ -574,7 +603,8 @@ function readInputs(){
   const V = money('valorPagar');
   const levas = (MODO==='avista')
     ? PrecatEngine.buildLevas('avista', di, V, 1)
-    : PrecatEngine.buildLevas('parcelado', di, V, Math.max(1, num('nParcelas')));
+    : (PARCELAS.length ? PARCELAS.map(p=>({date:p.date, valor:p.valor}))
+                       : PrecatEngine.buildLevas('parcelado', di, V, Math.max(1, num('nParcelas'))));
   return { ehPrecatorio:EHPREC, modo:MODO, temEarnout:TEMEO, temAcordo:TEMAC,
     face:money('face'), valorCausa:money('valorCausa'), viraMeses:num('viraMeses'), prazoMeses:num('prazo'),
     corrIdx:"IPCA", corrSpread:num('corrSpread')/100,
@@ -688,7 +718,12 @@ function goalSeek(){
   const efPrazo = inp.temAcordo ? inp.acordoPrazo : inp.prazoMeses;
   if(!(inp.face>0) || !(efPrazo>0) || !(target>0)){ toast('Preencha face, prazo e TIR-alvo (>0) antes de resolver o preço'); return; }
   const f=solvePricef(inp, target);
-  $('valorPagar').value=fmtBRL(money('valorPagar')*f);  // escala o valor a pagar (à vista ou parcelado V÷N)
+  if(MODO==='parcelado' && PARCELAS.length){            // escala cada parcela (preserva datas/distribuição editadas)
+    PARCELAS.forEach(p=>p.valor*=f); renderParcelas();
+    $('valorPagar').value=fmtBRL(PARCELAS.reduce((s,p)=>s+(p.valor||0),0));
+  } else {
+    $('valorPagar').value=fmtBRL(money('valorPagar')*f);  // à vista: escala o valor a pagar
+  }
   recalc();
   toast('Preço resolvido para TIR-alvo de '+(target*100).toFixed(2)+'%');
 }
@@ -699,7 +734,7 @@ function buildState(){
     face:$('face').value, vc:$('valorCausa').value, vira:num('viraMeses'), prazo:num('prazo'),
     cs:num('corrSpread'), cpi:$('corrPreIdx').value, cp:num('corrPre'),
     im:IPCAMODE, iv:num('ipcaVal'), vp:$('valorPagar').value, di:$('dataInicio').value, np:num('nParcelas'), ta:num('tirAlvo'),
-    dn:$('docNome').value, dd:$('docData').value,
+    dn:$('docNome').value, dd:$('docData').value, parc:PARCELAS,
     af:num('acFator'), ap:num('acPrazo'), ei:$('eoIdx').value, es:num('eoSpread'),
     jan:JAN_DEF };
 }
@@ -711,6 +746,7 @@ function applyState(s){ try{
   $('acFator').value=s.af; $('acPrazo').value=s.ap; $('eoIdx').value=s.ei; $('eoSpread').value=s.es;
   if(Array.isArray(s.jan)) JAN_DEF.splice(0,JAN_DEF.length,...s.jan);
   MODO=s.modo||'avista'; IPCAMODE=s.im||'curva';
+  if(Array.isArray(s.parc)) PARCELAS=s.parc.map(p=>({date:p.date, valor:p.valor}));
   if(s.dn!=null)$('docNome').value=s.dn; if(s.dd)$('docData').value=s.dd;
 }catch(e){} }
 function encodeState(){ return btoa(unescape(encodeURIComponent(JSON.stringify(buildState())))); }
@@ -827,6 +863,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   if(!$('dataInicio').value) $('dataInicio').value=SNAP.data_base;   // default = data-base da ETTJ
   if(!$('docData').value){ const t=new Date(); $('docData').value=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0'); }
   updateDocTitle();
+  if(MODO==='parcelado'){ if(PARCELAS.length) renderParcelas(); else regenParcelas(); }
   renderJanelas(); sync();
 });
 </script>
