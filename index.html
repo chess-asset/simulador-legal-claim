@@ -203,6 +203,7 @@
         <div class="res"><span class="k">Fator deságio<span class="help" title="Quanto você paga como fração do valor atualizado nominal de hoje (preço ÷ valor atualizado = 1 − deságio).">i</span></span><span class="v" id="rDes">—</span></div>
         <div class="res"><span class="k">MOIC<span class="help" title="Múltiplo sobre o capital: total recebido ÷ preço pago.">i</span></span><span class="v" id="rMoic">—</span></div>
         <div class="res"><span class="k">Pagamento em</span><span class="v" id="rData">—</span></div>
+        <div class="res hide" id="rowEoZera"><span class="k">Earn-out zera em<span class="help" title="Âncora de negociação: data em que o piso do earn-out (preço remarcado a piso-índice + spread, composto) alcança o valor a receber (face corrigido no tempo × fator de acordo). A partir dela o earn-out é zero — independe do prazo e do % das janelas. 'nasce zerado' = o piso já supera o recebido hoje; 'não zera' = o piso cresce devagar demais e não alcança no horizonte.">i</span></span><span class="v" id="rEoZera">—</span></div>
       </div>
       <div class="panel">
         <h2 class="sec">Composição do recebimento</h2>
@@ -395,6 +396,15 @@ function price(inp, snap, ferSet){
   let cIpcaFrac = 0; // fração de IPCA da correção (juros simples) = Σ IPCA[m]*dc/365, p/ decompor PRÉ/IPCA
   let dcCorrFrac = 0; // fração de tempo (Σ dc/365) da janela de correção, p/ a IPCA MÉDIA aplicada (= IPCA da ETTJ)
   let earnoutPago = 0, recebidoBrutoBullet = 0, earnoutPctBase = 0; // p/ composição e sensibilidade
+  // DATA DE ZERAGEM DO EARN-OUT (âncora de negociação): 1º pagamento (fim de mês) em que o piso
+  // remarcado (hurEoP, composto a eoIdx+spread) alcança o recebido = face corrigido no tempo ×
+  // fator de acordo — a partir dele o earn-out é zero. Como o pagamento (bullet) é sempre fim de
+  // mês, reporta o 1º mês com recebido ≤ piso (sem interpolar o dia — casa com o Excel à data).
+  // Independe do bullet/prazo escolhidos e do % das janelas — é propriedade das 2 curvas, que
+  // acumulam TODO mês (sem o corte do bullet que gateia a correção do sub-ledger).
+  const fatorCross = inp.temAcordo ? inp.acordoFator : 1;
+  let faceCorrFull = face;
+  let eoZera = { estado: "NAO_ZERA", data: null, valor: null };
   for (let m = 1; m <= NMONTHS; m++){
     // precatório
     precBoP[m] = (m === 1) ? face : precEoP[m - 1];
@@ -421,6 +431,15 @@ function price(inp, snap, ferSet){
     hurBoP[m] = (m === 1) ? precoPago : hurEoP[m - 1];
     const hurJur = (Math.pow((1 + idxRate(inp.eoIdx, m, "eo")) * (1 + inp.eoSpread), du[m] / 252) - 1) * hurBoP[m];
     hurEoP[m] = hurBoP[m] + hurJur;
+
+    // crossover earn-out: recebido full (correção ungated × fator) vs piso full (hurEoP)
+    const rateCF = (!inp.ehPrecatorio && serial(date[m]) <= sVira)
+      ? (idxRate(inp.corrPreIdx || "Pré", m, "corr") + inp.corrPre)
+      : (idxRate(inp.corrIdx, m, "corr") + inp.corrSpread);
+    faceCorrFull += rateCF * dc[m] / 365 * causa;
+    if (eoZera.estado === "NAO_ZERA" && faceCorrFull * fatorCross <= hurEoP[m])  // 1º mês recebido ≤ piso
+      eoZera = (m === 1) ? { estado: "NASCE_ZERADO", data: null, valor: null }
+                         : { estado: "ZERA", data: isoDate(date[m]), valor: hurEoP[m] };
 
     // earn-out pagamentos
     const pmtAdj = inp.temAcordo ? precPMT[m] * inp.acordoFator : precPMT[m];
@@ -487,6 +506,7 @@ function price(inp, snap, ferSet){
            recebidoLiquidoBullet: recLiq,
            ipcaImplicito: ipcaSimples,   // a IPCA média aplicada = a linha IPCA da decomposição (mesmo número)
            ipcaSimples, spreadSimples, correcaoSimples, preComposto,
+           earnoutZeragem: eoZera,   // { estado: "ZERA"|"NASCE_ZERADO"|"NAO_ZERA", data, valor }
            fluxo: cfs.map((c, i) => ({ date: dts[i].toISOString().slice(0, 10), cf: c })),
            // detalhamento p/ exportação xlsx (checagem micro de cada linha calculada)
            detalhe: {
@@ -528,6 +548,7 @@ let MODO = "avista";
 const $ = (id)=>document.getElementById(id);
 const num = (id)=>parseFloat($(id).value)||0;
 const fmtBRL = (v)=> (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtMMYYYY = (iso)=> iso ? iso.slice(5,7)+'/'+iso.slice(0,4) : '—';   // "2030-11-01" -> "11/2030"
 const parseMoney = (s)=>{ s=String(s).replace(/\./g,'').replace(',','.').replace(/[^0-9.\-]/g,''); return parseFloat(s)||0; };
 const money = (id)=>parseMoney($(id).value);
 function maskMoney(el){ let s=el.value.replace(/[^\d,]/g,''); const hasC=s.indexOf(',')>=0;
@@ -639,7 +660,8 @@ function recalc(){
   if($('parcSoma')) $('parcSoma').textContent=fmtBRL(somaLevas);  // soma REAL das parcelas (reflete edições na hora)
   const efPrazo = inp.temAcordo ? inp.acordoPrazo : inp.prazoMeses;
   if(!(inp.face>0) || !(somaLevas>0) || !(efPrazo>0)){
-    ['rTir','rCorr','rPre','rPreco','rDes','rMoic','rData','cFace','cJuros','cFaceC','cFator','cEo','cRecLiq','cPreco'].forEach(id=>$(id).textContent='—');
+    ['rTir','rCorr','rPre','rPreco','rDes','rMoic','rData','rEoZera','cFace','cJuros','cFaceC','cFator','cEo','cRecLiq','cPreco'].forEach(id=>$(id).textContent='—');
+    $('rowEoZera').classList.add('hide');
     updateIpcaImpl(inp);   // IPCA implícito ainda aparece (depende só da curva+prazo), não força 0
     $('tblSensX').querySelector('thead').innerHTML=''; ['tblSensX','tblSensEo'].forEach(id=>$(id).querySelector('tbody').innerHTML='');
     return;
@@ -652,6 +674,11 @@ function recalc(){
   $('rDes').textContent=((1-o.desagio)*100).toFixed(1)+'%';
   $('rMoic').textContent=o.moic.toFixed(2)+'x';
   $('rData').textContent=o.dataPagamento;
+  // data de zeragem do earn-out (âncora de negociação) — só quando há earn-out
+  $('rowEoZera').classList.toggle('hide', !inp.temEarnout);
+  const z=o.earnoutZeragem;
+  $('rEoZera').textContent = z.estado==='ZERA' ? fmtMMYYYY(z.data)
+    : (z.estado==='NASCE_ZERADO' ? 'nasce zerado' : 'não zera no horizonte');
   // IPCA implícito da ETTJ: em modo ETTJ, mostra no campo (read-only)
   if(IPCAMODE==='curva') $('ipcaVal').value=(o.ipcaImplicito*100).toFixed(2);
   // composição do recebimento
