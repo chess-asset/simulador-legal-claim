@@ -1123,6 +1123,9 @@ function aplicaValorDaCalculadora(){
   if (vf === null) return;
   const n = parseFloat(String(vf).replace(',', '.'));
   if (!isFinite(n) || n <= 0) return;
+  // modo (dc|prec) conforme a fase do credito na calculadora -- expedido abre em Precatorio
+  const tipo = params.get('tipo');
+  if (tipo === 'prec') setTipo('prec'); else if (tipo === 'dc') setTipo('dc');
   $('face').value = fmtBRL(n);
   // Valor da causa -> #valorCausa (no modo DC e' "Valor da causa"; no precatorio, "Valor requisitado")
   const vc = params.get('vc');
