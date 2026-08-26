@@ -345,7 +345,18 @@ function businessDays(d0, d1, ferSet){ // NETWORKDAYS.INTL(d0,d1,1,feriados): in
 }
 
 // ---------- XIRR (Newton + bisseção) ----------
+// Contrato: devolve NaN quando o fluxo NÃO tem TIR. Devolver um número plausível nesse caso é
+// pior que não devolver nada — a tela não tem como saber que o valor é fictício.
+// A TIR vive em (-1, ∞): -100% é a perda total, e não existe retorno abaixo disso.
 function xirr(cfs, dates){
+  if (!Array.isArray(cfs) || !Array.isArray(dates) || !cfs.length || cfs.length !== dates.length)
+    return NaN;
+  // Sem troca de sinal o VPL é monótono e nunca cruza zero: não há raiz a encontrar. Era por aqui
+  // que fluxo todo-positivo/todo-negativo saía como 10000% a.a. (o teto `hi` da bisseção).
+  let temPos = false, temNeg = false;
+  for (const c of cfs){ if (c > 0) temPos = true; else if (c < 0) temNeg = true; }
+  if (!temPos || !temNeg) return NaN;
+
   const t0 = serial(dates[0]);
   const yf = (d) => (serial(d) - t0) / 365;
   const npv = (r) => cfs.reduce((s, c, i) => s + c / Math.pow(1 + r, yf(dates[i])), 0);
@@ -355,19 +366,29 @@ function xirr(cfs, dates){
     const f = npv(r), d = dnpv(r);
     if (!isFinite(f) || !isFinite(d) || d === 0) break;
     const nr = r - f / d;
+    if (nr <= -1) break;   // saiu do domínio: base negativa com expoente fracionário só gera NaN
     if (Math.abs(nr - r) < 1e-10){ r = nr; break; }
     r = nr;
   }
-  if (!isFinite(r) || Math.abs(npv(r)) > 1){
-    let lo = -0.9999, hi = 100, flo = npv(lo);
-    for (let i = 0; i < 300; i++){
-      const mid = (lo + hi) / 2, fm = npv(mid);
-      if (Math.abs(fm) < 1e-7){ r = mid; break; }
-      if ((flo < 0) !== (fm < 0)) hi = mid; else { lo = mid; flo = fm; }
-      r = mid;
-    }
+  // Aceita Newton só com resíduo FINITO e pequeno. O guard antigo era `Math.abs(npv(r)) > 1`, e
+  // `NaN > 1` é false — então um r fora do domínio passava direto como se tivesse convergido.
+  const fr = (isFinite(r) && r > -1) ? npv(r) : NaN;
+  if (isFinite(fr) && Math.abs(fr) <= 1) return r;
+
+  // Bisseção só com a raiz CERCADA. Sem troca de sinal entre os extremos não há o que convergir —
+  // antes disso o laço marchava até o teto e devolvia `hi`.
+  let lo = -0.9999, hi = 100;
+  let flo = npv(lo), fhi = npv(hi);
+  if (!isFinite(flo) || !isFinite(fhi) || (flo < 0) === (fhi < 0)) return NaN;
+  let mid = r;
+  for (let i = 0; i < 300; i++){
+    mid = (lo + hi) / 2;
+    const fm = npv(mid);
+    if (!isFinite(fm)) return NaN;
+    if (Math.abs(fm) < 1e-7) return mid;
+    if ((flo < 0) !== (fm < 0)) hi = mid; else { lo = mid; flo = fm; }
   }
-  return r;
+  return mid;
 }
 
 // ---------- preço/TIR (porta da aba Motor) ----------
@@ -384,7 +405,19 @@ function xirr(cfs, dates){
 //   eoIdx, eoSpread, eoJanelas:[{de,ate,pct}], eo2Valor, eo2Mes, sensPricef, sensPrazoDelta,
 //   ipcaOverride: se != null, substitui o IPCA breakeven implícito da curva pelo valor (a.a., decimal)}
 // snap: snapshot_curva.json ; ferSet: Set de seriais (feriados)
-const NMONTHS = 163;
+// Largura da timeline. 163 é a largura da aba Motor do template Excel e continua sendo o PISO —
+// assim todo cenário que já cabia lá roda exatamente igual e a paridade dos golden fica intacta.
+// Acima disso a timeline cresce até cobrir o último vencimento do cenário: com o teto fixo, um
+// crédito com vira+prazo > 163 meses (13,6 anos — cenário de mesa, não patologia) simplesmente
+// não era pago, e o motor devolvia MOIC 0,00x e "pagamento" no mês 1 sem sinalizar nada.
+const NMONTHS_MIN = 163;
+// Backstop para input absurdo não virar laço interminável. Vencimento além disso (~99,9 anos) não
+// é pago e a TIR sai NaN -> a tela mostra "—". É o comportamento certo: melhor recusar a responder
+// que devolver um número que ninguém pode conferir.
+const NMONTHS_MAX = 1200;
+function mesesEntre(d0, d1){
+  return (d1.getUTCFullYear() - d0.getUTCFullYear()) * 12 + (d1.getUTCMonth() - d0.getUTCMonth());
+}
 function price(inp, snap, ferSet){
   const curveBase = parseDate(snap.data_base);                         // curva: tenor da Svensson
   const base = inp.dataInicio ? parseDate(inp.dataInicio) : curveBase; // opBase: data de início rege a timeline
@@ -394,7 +427,11 @@ function price(inp, snap, ferSet){
 
   // C17 vira_data, C18 prazo, bullet
   const viraData = inp.ehPrecatorio ? eomonth(base, 0) : eomonth(base, inp.viraMeses);
-  const prazo = inp.temAcordo ? inp.acordoPrazo : (inp.prazoMeses + prazoDelta);
+  // sensPrazoDelta entra UMA vez. Aqui, no prazo que forma o `bullet` — vale igual com e sem
+  // acordo, para que o eixo de prazo da sensibilidade tenha a mesma semântica nos dois casos.
+  // Quem NÃO pode deslocar de novo é o evento de recebimento default, que nasce deste bullet
+  // (ver `_shift` abaixo): somar lá era aplicar o delta em dobro.
+  const prazo = (inp.temAcordo ? inp.acordoPrazo : inp.prazoMeses) + prazoDelta;
   const bullet = eomonth(viraData, prazo);
   const sBullet = serial(bullet), sVira = serial(viraData);
 
@@ -413,12 +450,15 @@ function price(inp, snap, ferSet){
   // elemento (pct=1 na data do bullet): não existe "caminho do à vista" separado que possa regredir.
   // Por evento: `pct` = fatia do crédito (fração) numa linha automática; `valor` = R$ travado pelo
   // usuário. Valor travado vence o pct. Sem o campo => comportamento idêntico ao bullet de sempre.
-  const _recebIn = (Array.isArray(inp.recebimentos) && inp.recebimentos.length)
+  const _recebFornecido = Array.isArray(inp.recebimentos) && inp.recebimentos.length > 0;
+  const _recebIn = _recebFornecido
     ? inp.recebimentos.slice() : [{ date: isoDate(bullet), pct: 1, valor: null }];
   // sensibilidade de PRAZO: no parcelado o cronograma é que rege as datas, então o delta de prazo
   // desloca TODAS as parcelas (o cenário "e se tudo atrasar N meses"). Sem isto o eixo de prazo da
   // matriz de sensibilidade fica constante no parcelado — número que parece resposta e não é.
-  const _shift = (d) => (prazoDelta === 0) ? d : isoDate(addMonths(parseDate(d), prazoDelta));
+  // Só a grade FORNECIDA é deslocada: o evento default já saiu do `bullet`, que embute o delta.
+  const _shift = (d) => (prazoDelta === 0 || !_recebFornecido)
+    ? d : isoDate(addMonths(parseDate(d), prazoDelta));
   const recebEv = _recebIn
     .map(e => ({ date: _shift(e.date),
                  pct: (e.valor != null) ? null : (e.pct != null ? e.pct : 0),
@@ -453,6 +493,16 @@ function price(inp, snap, ferSet){
   // e no DRE via (1 - liquidoFator). Sem descontos => totalDescontos=0 => fator 1 (goldens intactos).
   const totalDescontos = somaBrl + somaPct / 100 * face;
   const liquidoFator = (face > 0) ? Math.max(0, (face - totalDescontos) / face) : 1;
+
+  // largura efetiva da timeline: cobre o último vencimento do cenário (bullet, levas de pagamento,
+  // recebimentos e o mês do earn-out adicional), nunca abaixo do piso de paridade com o Excel.
+  let _mesesNec = NMONTHS_MIN;
+  const _cobre = (dt) => { _mesesNec = Math.max(_mesesNec, mesesEntre(base, dt) + 1); };
+  _cobre(bullet);
+  for (const l of levas) if (l && l.date) _cobre(parseDate(l.date));
+  for (const e of recebEv) _cobre(parseDate(e.date));
+  if (inp.eo2Mes > _mesesNec) _mesesNec = inp.eo2Mes;
+  const NMONTHS = Math.min(NMONTHS_MAX, _mesesNec);
 
   // timeline meses 1..NMONTHS
   const date = [], dc = [], du = [], Pre = [], JR = [], IPCA = [], FRA = [], ten = [];
@@ -851,6 +901,10 @@ const $ = (id)=>document.getElementById(id);
 const num = (id)=>parseFloat($(id).value)||0;
 const fmtBRL = (v)=> (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtMMYYYY = (iso)=> iso ? iso.slice(5,7)+'/'+iso.slice(0,4) : '—';   // "2030-11-01" -> "11/2030"
+// TIR pode não existir: fluxo sem troca de sinal (ex.: honorário embutido de 100%, que zera a
+// realização) não tem raiz, e o motor devolve NaN de propósito em vez de um número plausível.
+// Aqui isso vira "—" — nunca "NaN%", e nunca um percentual inventado.
+const fmtTir = (v, casas)=> Number.isFinite(v) ? (v*100).toFixed(casas==null?2:casas)+'%' : '—';
 const fmtDataBR = (iso)=> iso ? String(iso).split('-').reverse().join('/') : '—';   // "2030-11-01" -> "01/11/2030"
 const parseMoney = (s)=>{ s=String(s).replace(/\./g,'').replace(',','.').replace(/[^0-9.\-]/g,''); return parseFloat(s)||0; };
 const money = (id)=>parseMoney($(id).value);
@@ -1079,7 +1133,7 @@ function recalc(){
   renderReceb(o);   // os R$ das linhas automáticas vêm do motor, não da tela
   // Valor requisitado (auto, modo DC) = valor da causa corrigido até virar precatório (causaPos)
   if(!EHPREC) $('reqOut').value=fmtBRL(o.detalhe.comp.causaPos);
-  $('rTir').textContent=(o.tir*100).toFixed(2)+'%';
+  $('rTir').textContent=fmtTir(o.tir);
   $('rCorr').textContent=(o.correcaoSimples*100).toFixed(2)+'%';
   $('rPre').textContent=(o.preComposto*100).toFixed(1)+'%';
   $('rPreco').textContent=fmtBRL(o.preco);
@@ -1133,7 +1187,7 @@ function recalc(){
   if(temHon && embut){
     const oBr=PrecatEngine.price(Object.assign({},inp,{honorarioPct:0}),SNAP,FER);
     $('rowTirBruta').classList.remove('hide');
-    $('rTirBruta').textContent=(oBr.tir*100).toFixed(2)+'% · '+oBr.moic.toFixed(2)+'x';
+    $('rTirBruta').textContent=fmtTir(oBr.tir)+' · '+oBr.moic.toFixed(2)+'x';
   } else {
     $('rowTirBruta').classList.add('hide');
   }
@@ -1197,7 +1251,7 @@ function redrawSensBody(){
       const o2=PrecatEngine.price(inp2,SNAP,FER);
       const isBaseCol = Math.abs(preco - basePreco) < 1;
       const cls = (isBaseRow && isBaseCol) ? 'basecase' : (isBaseCol ? 'basecol' : '');
-      row+=`<td${cls?` class="${cls}"`:''}>${(o2.tir*100).toFixed(1)}%</td>`;
+      row+=`<td${cls?` class="${cls}"`:''}>${fmtTir(o2.tir,1)}</td>`;
     });
     html+=row+'</tr>';
   });
@@ -1232,7 +1286,7 @@ function renderSensEo(o, inp){
     const jan=(inp.eoJanelas||[]).map(w=>({de:w.de,ate:w.ate,pct:Math.max(0,Math.min(1,w.pct+d))}));
     const o2=PrecatEngine.price(Object.assign({},inp,{eoJanelas:jan}),SNAP,FER);
     const tr=document.createElement('tr'); if(Math.abs(d)<1e-9) tr.className='basecase';
-    tr.innerHTML=`<td>${(pct*100).toFixed(0)}%</td><td>${f2(o2.tir)}</td>`;
+    tr.innerHTML=`<td>${(pct*100).toFixed(0)}%</td><td>${fmtTir(o2.tir)}</td>`;
     tb.appendChild(tr);
   });
 }
@@ -1253,6 +1307,15 @@ function goalSeek(){
   const efPrazo = inp.temAcordo ? inp.acordoPrazo : inp.prazoMeses;
   if(!(inp.face>0) || !(efPrazo>0) || !(target>0)){ toast('Preencha face, prazo e TIR-alvo (>0) antes de resolver o preço'); return; }
   const f=solvePricef(inp, target);
+  // solvePricef SATURA nos extremos (0,0005x / 50x) quando o alvo está fora do alcançável, e antes
+  // disso o preço saturado era escrito no campo com toast de sucesso. Confere se o alvo foi de
+  // fato atingido antes de tocar no campo: anunciar solução inexistente é pior que não resolver.
+  const tirObtida=PrecatEngine.price(Object.assign({},inp,{sensPricef:f}),SNAP,FER).tir;
+  if(!Number.isFinite(tirObtida) || Math.abs(tirObtida-target)>1e-4){
+    toast('TIR-alvo de '+(target*100).toFixed(2)+'% não é atingível neste cenário'
+      +(Number.isFinite(tirObtida)?' (mais próximo: '+(tirObtida*100).toFixed(2)+'%)':'')+' — preço não alterado');
+    return;
+  }
   if(MODO==='parcelado' && PARCELAS.length){            // escala cada parcela (preserva datas/distribuição editadas)
     PARCELAS.forEach(p=>p.valor*=f); renderParcelas();
     $('valorPagar').value=fmtBRL(PARCELAS.reduce((s,p)=>s+(p.valor||0),0));
