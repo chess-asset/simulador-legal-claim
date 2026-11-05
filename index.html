@@ -877,22 +877,22 @@ if(typeof window!=="undefined") window.XlsxExport=_XAPI;
 </script>
 <script>
 const SNAP = {
-  "data_base": "2026-10-02",
+  "data_base": "2026-11-04",
   "pre": {
-    "b1": 0.141632714783619,
-    "b2": -0.00653040965410517,
-    "b3": -0.023374359353389,
-    "b4": 0.017046207120235,
-    "l1": 1.44574033040126,
-    "l2": 0.372080209430243
+    "b1": 0.140966998689649,
+    "b2": -0.00690346245478932,
+    "b3": -0.00302887225568975,
+    "b4": 0.0469248891006729,
+    "l1": 1.29792783742881,
+    "l2": 0.360663419026378
   },
   "ipca": {
-    "b1": 0.064259849169563,
-    "b2": -0.0392966490121472,
-    "b3": 0.0536400507557193,
-    "b4": 0.0345904364634853,
-    "l1": 1.68877886810934,
-    "l2": 0.308023018296953
+    "b1": 0.0707860181132625,
+    "b2": -0.0588480454301976,
+    "b3": 0.0785121838169975,
+    "b4": 0.0200646552275997,
+    "l1": 1.45439069572451,
+    "l2": 0.266975878939506
   }
 };
 const FER = new Set(window.FERIADOS);
@@ -1463,10 +1463,18 @@ function exportarXlsx(){
     .catch(e=>toast('Falha ao gerar a planilha: '+(e.message||e)));
 }
 
-// F2 (cross-produto calculadora->simulador): ?vf=<valor_corrigido_hoje>&vc=<valor_da_causa>
-// &hp=<honorario%>&hm=<modo>&desc=<base64 JSON descontos>&nome=<caso>&origem=calculadora
+// F2 (cross-produto calculadora/motor->simulador): ?vf=<valor_corrigido_hoje>&vc=<valor_da_causa>
+// &prazo=<meses>&vp=<preco>&ta=<tir_alvo_%>&hp=<honorario%>&hm=<modo>&desc=<base64 JSON descontos>
+// &nome=<caso>&origem=calculadora
 // pre-preenche os inputs correspondentes e dispara o recalc padrao -- NAO mexe no engine nem em
 // nenhuma conta, so' preenchimento de input (mesmo padrao do ?c= de estado).
+//
+// `prazo`/`vp`/`ta` entraram em 2026-07-31 para o motor-rcl-precatorios: ele projeta a quitacao
+// pela cascata da fila do ente e ja' tem preco e TIR-alvo da rodada. Sem os tres o simulador
+// abria em MODO TEMPLATE -- o `recalc` exige face > 0, preco > 0 E prazo > 0, entao o painel
+// Resultado ficava inteiro em "--" ate' alguem digitar, o que esvaziava o link "aprofundar".
+// Mantidos OPCIONAIS e no mesmo padrao dos demais: quem nao manda (a calculadora, hoje)
+// continua caindo no default de antes.
 function aplicaValorDaCalculadora(){
   const params = new URLSearchParams(location.search);
   const vf = params.get('vf');
@@ -1480,6 +1488,18 @@ function aplicaValorDaCalculadora(){
   // Valor da causa -> #valorCausa (no modo DC e' "Valor da causa"; no precatorio, "Valor requisitado")
   const vc = params.get('vc');
   if (vc !== null){ const nc = parseFloat(String(vc).replace(',', '.')); if (isFinite(nc) && nc > 0) $('valorCausa').value = fmtBRL(nc); }
+  // prazo ate o pagamento, em MESES (#prazo). Inteiro >= 0; ignora lixo em vez de escrever
+  // NaN no input -- campo em branco o analista percebe, "NaN" nao.
+  const prazo = params.get('prazo');
+  if (prazo !== null){ const np = parseInt(prazo, 10); if (Number.isInteger(np) && np >= 0) $('prazo').value = np; }
+  // TIR-alvo em % a.a. (#tirAlvo) -- so' alimenta a linha de sensibilidade/preco-alvo
+  const ta = params.get('ta');
+  if (ta !== null){ const nt = parseFloat(String(ta).replace(',', '.')); if (isFinite(nt) && nt > 0) $('tirAlvo').value = nt; }
+  // preco / "Valor a pagar" (#valorPagar). Completa o trio que o `recalc` exige para sair do
+  // MODO TEMPLATE (face > 0, preco > 0, prazo > 0): com prazo mas sem preco o painel Resultado
+  // continua todo em "--", e o link chega inutil do mesmo jeito.
+  const vp = params.get('vp');
+  if (vp !== null){ const npg = parseFloat(String(vp).replace(',', '.')); if (isFinite(npg) && npg > 0) $('valorPagar').value = fmtBRL(npg); }
   // honorario (mesmos ids/semantica)
   const hp = params.get('hp');
   if (hp){ $('inHonorarioPct').value = hp; const hm = params.get('hm'); if (hm) $('inHonorarioModo').value = hm; }
